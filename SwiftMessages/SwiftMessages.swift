@@ -509,6 +509,8 @@ open class SwiftMessages {
      */
     public var defaultConfig = Config()
 
+    public var delayWorkItem: DispatchWorkItem?
+    
     /**
      Specifies the amount of time to pause between removing a message
      and showing the next. Default is 0.5 seconds.
@@ -633,6 +635,11 @@ open class SwiftMessages {
                     guard strongSelf._current === current else { return }
                     strongSelf.counts[current.id] = nil
                     strongSelf._current = nil
+                    if let work = strongSelf.delayWorkItem {
+                        work.cancel()
+                        strongSelf.executeAfterClose()
+                        strongSelf.delayWorkItem = nil
+                    }
                 }
             }
         }
@@ -649,12 +656,18 @@ open class SwiftMessages {
         autohideToken = current
         if let pauseDuration = current.pauseDuration {
             let delayTime = DispatchTime.now() + pauseDuration
-            messageQueue.asyncAfter(deadline: delayTime, execute: {
-                // Make sure we've still got a green light to auto-hide.
-                if self.autohideToken !== current { return }
-                self.internalHide(presenter: current)
-            })
+            let workItem = DispatchWorkItem(block: self.executeAfterClose)
+            self.delayWorkItem = workItem
+            messageQueue.asyncAfter(deadline: delayTime, execute: workItem)
         }
+    }
+    
+    private func executeAfterClose() {
+        // Make sure we've still got a green light to auto-hide.
+        guard let current = _current, current === self.autohideToken else {
+            return
+        }
+        self.internalHide(presenter: current)
     }
 
     deinit {
